@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Service Missionary Hours</title>
+  <style>
+    :root{
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+      line-height:1.35;
+      color:#111;
+    }
+    body{
+      margin:0;
+      padding:20px;
+      background:#f7f7f7;
+    }
+    .card{
+      max-width:720px;
+      margin:0 auto;
+      background:#fff;
+      border:1px solid #e6e6e6;
+      border-radius:16px;
+      padding:18px;
+      box-shadow:0 1px 8px rgba(0,0,0,.05);
+    }
+    h1{
+      margin:0 0 8px;
+      font-size:20px;
+      font-weight:700;
+    }
+    p.sub{
+      margin:0 0 16px;
+      font-size:13px;
+      color:#444;
+    }
+    label{
+      display:block;
+      margin:12px 0 6px;
+      font-size:13px;
+      font-weight:650;
+      color:#333;
+    }
+    select,input{
+      width:100%;
+      box-sizing:border-box;
+      padding:11px 12px;
+      font-size:14px;
+      border-radius:12px;
+      border:1px solid #d7d7d7;
+      background:#fff;
+      outline:none;
+    }
+    input:focus,select:focus{
+      border-color:#b9b9b9;
+      box-shadow:0 0 0 3px rgba(0,0,0,.06);
+    }
+    .row{
+      display:grid;
+      grid-template-columns:1fr;
+      gap:10px;
+    }
+    @media (min-width:720px){
+      .row.two{ grid-template-columns: 1fr 1fr; }
+    }
+    .btnrow{
+      margin-top:14px;
+      display:flex;
+      gap:10px;
+      align-items:center;
+      flex-wrap:wrap;
+    }
+    button{
+      appearance:none;
+      border:0;
+      border-radius:12px;
+      padding:11px 14px;
+      font-size:14px;
+      font-weight:700;
+      cursor:pointer;
+      background:#111;
+      color:#fff;
+    }
+    button[disabled]{
+      opacity:.55;
+      cursor:not-allowed;
+    }
+    .status{
+      margin-top:12px;
+      padding:10px 12px;
+      border-radius:12px;
+      border:1px solid #ededed;
+      background:#fcfcfc;
+      display:none;
+      font-size:13px;
+      color:#333;
+      white-space:pre-wrap;
+    }
+    .status.ok{
+      border-color:#cfe8d4;
+      background:#f2fbf4;
+    }
+    .status.err{
+      border-color:#f2c9c9;
+      background:#fff5f5;
+    }
+    .tiny{
+      margin-top:10px;
+      font-size:12px;
+      color:#666;
+    }
+    .req{ color:#b00020; }
+  </style>
+</head>
+
+<body>
+  <div class="card">
+    <h1>Service Missionary Hours</h1>
+    <p class="sub">Enter your hours for the month. Submission time is recorded automatically.</p>
+
+    <form id="hoursForm">
+      <div class="row two">
+        <div>
+          <label for="month"><span class="req">*</span> Month</label>
+          <select id="month" name="month" required>
+            <option value="">— Select month —</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="hours"><span class="req">*</span> Hours</label>
+          <input
+            id="hours"
+            name="hours"
+            type="number"
+            inputmode="decimal"
+            min="0"
+            step="0.25"
+            placeholder="e.g., 12 or 12.5"
+            required
+          />
+        </div>
+      </div>
+
+      <label for="name">Name (optional but helpful)</label>
+      <input
+        id="name"
+        name="name"
+        type="text"
+        autocomplete="name"
+        placeholder="Your name"
+      />
+
+      <!-- Optional metadata -->
+      <input id="source" name="source" type="hidden" value="nfc" />
+
+      <div class="btnrow">
+        <button id="submitBtn" type="submit">Submit Hours</button>
+      </div>
+
+      <div id="status" class="status"></div>
+      <div class="tiny">Tip: If you submit multiple times in a month, that’s okay—monthly reporting will sum your entries.</div>
+    </form>
+  </div>
+
+  <script>
+    // 1) Paste your Make webhook URL here:
+    const WEBHOOK_URL = "PASTE_YOUR_MAKE_WEBHOOK_URL_HERE";
+
+    // 2) Build month dropdown: current month back 2 months, forward 18 months (edit as desired)
+    const monthSelect = document.getElementById("month");
+    const now = new Date();
+
+    function fmtMonthLabel(d){
+      const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+      return `${monthNames[d.getMonth()]} ${d.getFullYear()}`;
+    }
+
+    function fmtMonthValue(d){
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      return `${d.getFullYear()}-${mm}`; // YYYY-MM (stable)
+    }
+
+    function addMonths(dateObj, delta){
+      const d = new Date(dateObj.getFullYear(), dateObj.getMonth(), 1);
+      d.setMonth(d.getMonth() + delta);
+      return d;
+    }
+
+    const start = addMonths(now, -2);
+    const end = addMonths(now, 18);
+
+    // Preselect current month
+    const currentValue = fmtMonthValue(new Date(now.getFullYear(), now.getMonth(), 1));
+
+    for (let d = new Date(start); d <= end; d = addMonths(d, 1)) {
+      const opt = document.createElement("option");
+      opt.value = fmtMonthValue(d);
+      opt.textContent = fmtMonthLabel(d);
+      if (opt.value === currentValue) opt.selected = true;
+      monthSelect.appendChild(opt);
+    }
+
+    const form = document.getElementById("hoursForm");
+    const submitBtn = document.getElementById("submitBtn");
+    const statusBox = document.getElementById("status");
+
+    function setStatus(kind, msg){
+      statusBox.className = "status " + (kind || "");
+      statusBox.textContent = msg;
+      statusBox.style.display = "block";
+    }
+
+    function clearStatus(){
+      statusBox.style.display = "none";
+      statusBox.textContent = "";
+      statusBox.className = "status";
+    }
+
+    function normalizeHours(v){
+      // Allow commas/spaces; keep it simple
+      const s = String(v).trim().replace(/,/g, "");
+      const n = Number(s);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      clearStatus();
+
+      if (!WEBHOOK_URL || WEBHOOK_URL.includes("PASTE_YOUR_MAKE_WEBHOOK_URL_HERE")) {
+        setStatus("err", "Missing webhook URL. Edit the HTML and set WEBHOOK_URL to your Make custom webhook URL.");
+        return;
+      }
+
+      const month = document.getElementById("month").value;
+      const hoursRaw = document.getElementById("hours").value;
+      const hours = normalizeHours(hoursRaw);
+      const name = document.getElementById("name").value.trim();
+      const source = document.getElementById("source").value || "nfc";
+
+      if (!month) { setStatus("err", "Please select a month."); return; }
+      if (hours === null || hours < 0) { setStatus("err", "Please enter a valid number of hours (0 or more)."); return; }
+
+      const payload = {
+        month,
+        hours,
+        name: name || "",      // optional
+        source: source || "nfc" // optional
+      };
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Submitting…";
+
+      try {
+        const res = await fetch(WEBHOOK_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        const text = await res.text();
+        let data = null;
+        try { data = JSON.parse(text); } catch (_) {}
+
+        if (!res.ok) {
+          setStatus("err", `Submit failed (HTTP ${res.status}).\n${data ? JSON.stringify(data) : text}`);
+          return;
+        }
+
+        // If Make returns JSON like {"status":"Saved"} we'll show it; otherwise generic success.
+        const msg = (data && (data.status || data.message))
+          ? String(data.status || data.message)
+          : "Saved.";
+
+        setStatus("ok", msg);
+
+        // Light reset: keep month selected, clear hours
+        document.getElementById("hours").value = "";
+        // Keep name (autofill) as-is; optional: comment out next line if you want to clear name too
+        // document.getElementById("name").value = "";
+
+      } catch (err) {
+        setStatus("err", "Network error submitting form. Please try again.\n" + (err?.message || String(err)));
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Submit Hours";
+      }
+    });
+  </script>
+</body>
+</html>
